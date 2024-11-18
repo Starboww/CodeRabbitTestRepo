@@ -4,53 +4,79 @@ import `in`.starbow.broadcast.databinding.ActivityMainBinding
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
-import android.widget.Button
-import android.widget.EditText
 import android.widget.Toast
-import com.google.android.material.textfield.TextInputEditText
-import com.google.android.material.textfield.TextInputLayout
+import androidx.lifecycle.ViewModelProvider
 import com.google.firebase.messaging.FirebaseMessaging
-import com.google.gson.Gson
-import kotlinx.coroutines.CoroutineScope
+import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
-import java.lang.Exception
+import kotlinx.coroutines.withContext
+import javax.inject.Inject
 
+@AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
+    private lateinit var binding: ActivityMainBinding
+
+    @Inject
+    lateinit var firebaseMessaging: FirebaseMessaging
+
+    private lateinit var viewModel: NotificationViewModel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
-        var pin: String? = intent.getStringExtra("pin")
-        Log.d("MAIN","$pin")
-        var Topic = "/topics/$pin"
-        FirebaseMessaging.getInstance().subscribeToTopic(Topic)
-        var broadCastBtn=findViewById<Button>(R.id.btnBroadCast)
-        var tit = findViewById<TextInputEditText>(R.id.edTitleTxt)
-        var msg = findViewById<TextInputEditText>(R.id.edtxtMsg)
-       broadCastBtn.setOnClickListener {
-           val title = tit.text.toString()
-           val message = msg.text.toString()
-           Log.d("DEB","$title"+" "+"$message");
-           if(title.isNotEmpty()&&message.isNotEmpty())
-           {
-                pushNotification(NotificationData(title, message), Topic).also {
-                    sendNotification(it)
-                }
-           }
 
-       }
-    }
-    private fun sendNotification(notification:pushNotification)= CoroutineScope(Dispatchers.IO).launch {
-        try{
-           val response = Retrofitinstance.api.postNotification(notification)
-        }catch (e:Exception){
-            Log.i("Main",e.toString())
+        // View Binding
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        viewModel = ViewModelProvider(this).get(NotificationViewModel::class.java)
+
+        // Get PIN from intent or fallback to default
+        val pin = intent.getStringExtra("pin") ?: "default"
+        val topic = "/topics/$pin"
+        subscribeToTopic(topic)
+
+        // Observe ViewModel state
+        setupObservers()
+
+        // Button click listener
+        binding.btnBroadCast.setOnClickListener {
+            val title = binding.edTitleTxt.text.toString()
+            val message = binding.edtxtMsg.text.toString()
+            if (title.isNotBlank() && message.isNotBlank()) {
+                val notification = NotificationData(title, message)
+                viewModel.sendNotification(notification, topic)
+            } else {
+                Toast.makeText(this, "Title and message cannot be empty!", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
+    private fun subscribeToTopic(topic: String) {
+        firebaseMessaging.subscribeToTopic(topic)
+            .addOnCompleteListener { task ->
+                if (task.isSuccessful) {
+                    Log.d("MAIN", "Subscribed to $topic")
+                } else {
+                    Log.e("MAIN", "Failed to subscribe to topic")
+                }
+            }
+    }
 
-
+    private fun setupObservers() {
+        viewModel.notificationState.observe(this) { state ->
+            when (state) {
+                is NotificationState.Success -> {
+                    Toast.makeText(this, "Notification sent!", Toast.LENGTH_SHORT).show()
+                }
+                is NotificationState.Error -> {
+                    Toast.makeText(this, "Failed to send notification: ${state.error}", Toast.LENGTH_LONG).show()
+                }
+                is NotificationState.Loading -> {
+                    // Show loading indicator (optional)
+                    Log.d("MAIN", "Sending notification...")
+                }
+            }
+        }
+    }
 }
